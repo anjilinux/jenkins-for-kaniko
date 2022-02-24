@@ -24,5 +24,8 @@ dockerRun {
             KANIKO_SUBNET_ID: 'my-subnet-id',
             KANIKO_SECURITY_GROUP_ID: 'my-security-group-id',
             KANIKO_REPOSITORY_URI: '299404798587.dkr.ecr.eu-west-1.amazonaws.com/kaniko-demo'
-    volumes("$awsDirectoryPath": '/var/jenkins_home/.aws')
+
+    if (file(awsDirectoryPath).exists()) {
+        volumes("$awsDirectoryPath": '/var/jenkins_home/.aws')
+    }
 }
