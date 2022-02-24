@@ -1,0 +1,75 @@
+<?xml version='1.1' encoding='UTF-8'?>
+<flow-definition plugin="workflow-job@2.40">
+  <actions>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobAction plugin="pipeline-model-definition@1.8.4"/>
+    <org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction plugin="pipeline-model-definition@1.8.4">
+      <jobProperties/>
+      <triggers/>
+      <parameters/>
+      <options/>
+    </org.jenkinsci.plugins.pipeline.modeldefinition.actions.DeclarativeJobPropertyTrackerAction>
+  </actions>
+  <description></description>
+  <keepDependencies>false</keepDependencies>
+  <properties/>
+  <definition class="org.jenkinsci.plugins.workflow.cps.CpsFlowDefinition" plugin="workflow-cps@2.92">
+    <script>pipeline {
+    agent any
+    stages {
+        stage(&apos;Build application&apos;) {
+            steps {
+                git url: &apos;https://github.com/tkgregory/spring-boot-api-example.git&apos;, branch: &apos;kaniko&apos;
+                sh &quot;./gradlew assemble dockerPrepare -Dorg.gradle.jvmargs=-Xmx2g&quot;
+                sh &quot;tar c build/docker | gzip | aws s3 cp - &apos;s3://$KANIKO_BUILD_CONTEXT_BUCKET_NAME/context.tar.gz&apos;&quot;
+            }
+        }
+        stage(&apos;Build and publish image&apos;) {
+            steps {
+                sh &apos;envsubst &lt; ecs-run-task-template.json &gt; ecs-run-task.json&apos;
+                script {
+                    LATEST_TASK_DEFINITION = sh(returnStdout: true, script: &quot;/bin/bash -c &apos;aws ecs list-task-definitions \
+                        --status active --sort DESC \
+                        --family-prefix $KANIKO_TASK_FAMILY_PREFIX \
+                        --query \&apos;taskDefinitionArns[0]\&apos; \
+                        --output text \
+                        | sed \&apos;s:.*/::\&apos;&apos;&quot;).trim()
+                    TASK_ARN = sh(returnStdout: true, script: &quot;/bin/bash -c &apos;aws ecs run-task \
+                        --task-definition $LATEST_TASK_DEFINITION \
+                         --cli-input-json file://ecs-run-task.json \
+                        | jq -j \&apos;.tasks[0].taskArn\&apos;&apos;&quot;).trim()
+                }
+                echo &quot;Submitted task $TASK_ARN&quot;
+                
+                sh &quot;aws ecs wait tasks-running --cluster jenkins-cluster --task $TASK_ARN&quot;
+                echo &quot;Task is running&quot;
+                
+                sh &quot;aws ecs wait tasks-stopped --cluster jenkins-cluster --task $TASK_ARN&quot;
+                echo &quot;Task has stopped&quot;
+                script {
+                    EXIT_CODE = sh(returnStdout: true, script: &quot;/bin/bash -c &apos;aws ecs describe-tasks \
+                    --cluster jenkins-cluster \
+                    --tasks $TASK_ARN \
+                    --query \&apos;tasks[0].containers[0].exitCode\&apos; \
+                    --output text&apos;&quot;).trim()
+
+                    if (EXIT_CODE == &apos;0&apos;) {
+                        echo &apos;Successfully built and published Docker image&apos;
+                    }
+                    else {
+                        error(&quot;Container exited with unexpected exit code $EXIT_CODE. Check the logs for details.&quot;)                    
+                    }
+                }
+            }
+        }
+        stage(&apos;Deploy&apos;) {
+            steps {
+                echo &apos;Deployment in progress&apos;
+            }
+        }
+    }
+}</script>
+    <sandbox>true</sandbox>
+  </definition>
+  <triggers/>
+  <disabled>false</disabled>
+</flow-definition>

@@ -1,0 +1,28 @@
+plugins {
+    id 'pl.allegro.tech.build.axion-release' version '1.12.1'
+    id 'com.palantir.docker' version '0.32.0'
+    id 'com.palantir.docker-run' version '0.32.0'
+}
+
+group 'com.tomgregory'
+project.version = scmVersion.version
+
+docker {
+    files 'plugins.txt', 'job-config.xml'
+    name "${project.name}:${project.version}"
+    tag 'latest', "tkgregory/${project.name}:latest"
+}
+String awsDirectoryPath = findProperty('awsDirectoryPath') ?: System.properties['user.home'] + "/.aws"
+dockerRun {
+    name "${project.name}"
+    image "${project.name}:${project.version}"
+    ports '8080:8080'
+    clean true
+    env KANIKO_BUILD_CONTEXT_BUCKET_NAME: 'kaniko-build-context',
+            KANIKO_TASK_FAMILY_PREFIX: 'kaniko-builder',
+            KANIKO_CLUSTER_NAME: 'jenkins-cluster',
+            KANIKO_SUBNET_ID: 'my-subnet-id',
+            KANIKO_SECURITY_GROUP_ID: 'my-security-group-id',
+            KANIKO_REPOSITORY_URI: '299404798587.dkr.ecr.eu-west-1.amazonaws.com/kaniko-demo'
+    volumes("$awsDirectoryPath": '/var/jenkins_home/.aws')
+}
